@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "policy": "dsh-plugin-naming/v1",
+  "plugin": {
+    "namespace": "xiaoziwenjie-code",
+    "name": "wechat-publisher",
+    "coordinate": "xiaoziwenjie-code/wechat-publisher",
+    "packageName": "dsh-plugin-wechat-publisher"
+  },
+  "names": {
+    "pluginNames": [
+      "xiaoziwenjie-code-wechat-publisher"
+    ],
+    "loaderIds": [
+      "xiaoziwenjie-code-wechat-publisher"
+    ],
+    "services": [],
+    "tools": [
+      "wechat_publish_article"
+    ],
+    "commands": [],
+    "skills": [],
+    "skillProviders": [],
+    "events": [],
+    "settingsNamespaces": [],
+    "routes": []
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "dsh-plugin-wechat-publisher",
+  "version": "0.1.0",
+  "description": "微信公众号发布插件 for DeepSeek Harness — 把 Markdown + 封面直推草稿箱，纯 Node 零依赖，官方 cgi-bin 接口",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.0"
+  }
+}
