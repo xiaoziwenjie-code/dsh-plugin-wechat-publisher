@@ -10,8 +10,34 @@
   },
   "files": [
     "dist",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
   ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "wechat",
+    "weixin",
+    "公众号",
+    "publish",
+    "markdown"
+  ],
+  "author": "xiaoziwenjie-code",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaoziwenjie-code/dsh-plugin-wechat-publisher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xiaoziwenjie-code/dsh-plugin-wechat-publisher/issues"
+  },
+  "homepage": "https://github.com/xiaoziwenjie-code/dsh-plugin-wechat-publisher#readme",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.1-rc.2"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -19,7 +45,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@deepseek-ai/dsh-tools": "0.2.1-rc.2"

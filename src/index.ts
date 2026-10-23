@@ -84,10 +84,16 @@ function guessMime(path: string): string {
  * Minimal Markdown → WeChat-compatible HTML.
  * Deliberately small: WeChat strips <style> blocks, so only inline-safe tags survive.
  */
-function markdownToHtml(md: string): string {
+function markdownToHtml(md: string, room: number): string {
+  const P_ROOM = room            // space after each paragraph
+  const H_ROOM = room + 14       // space above headings
+  const LI_ROOM = Math.max(4, Math.round(room * 0.55))
+
   const lines = md.split(/\r?\n/)
   const out: string[] = []
   let inList = false
+  let inFence = false
+  let fenceBuf: string[] = []
 
   const closeList = () => {
     if (inList) {
@@ -96,43 +102,95 @@ function markdownToHtml(md: string): string {
     }
   }
 
+  // WeChat strips <style> blocks but keeps inline style attributes on block
+  // elements, so paragraph rhythm has to be expressed inline.
+  const styleFor: Record<string, string> = {
+    p: `margin: 0 0 ${P_ROOM}px; line-height: 1.95; font-size: 16px; letter-spacing: 0.4px;`,
+    h1: `margin: ${H_ROOM}px 0 18px; line-height: 1.45; font-size: 24px; font-weight: 700;`,
+    h2: `margin: ${H_ROOM}px 0 18px; line-height: 1.45; font-size: 21px; font-weight: 700;`,
+    h3: `margin: 32px 0 16px; line-height: 1.5; font-size: 18px; font-weight: 700;`,
+    h4: `margin: 28px 0 14px; line-height: 1.5; font-size: 17px; font-weight: 700;`,
+    li: `margin: 0 0 ${LI_ROOM}px; line-height: 1.95; font-size: 16px;`,
+    blockquote: `margin: 0 0 ${P_ROOM}px; padding: 16px 20px; line-height: 1.9; font-size: 15px; border-left: 3px solid #d0d7de; color: #5b6472; background: #f7f8fa;`,
+    pre: `margin: 0 0 ${P_ROOM}px; padding: 18px 20px; overflow-x: auto; background: #f6f8fa; border-radius: 6px; font-size: 13px; line-height: 1.75;`,
+    hr: `margin: ${Math.round(P_ROOM * 1.8)}px 0; border: none; border-top: 1px solid #e5e7eb;`,
+  }
+
   for (const raw of lines) {
     const line = raw.trimEnd()
+
+    // ── fenced code block ```lang … ``` ───────────────────────────────
+    const fence = /^```(\w*)\s*$/.exec(line.trim())
+    if (fence) {
+      if (!inFence) {
+        closeList()
+        inFence = true
+        fenceBuf = []
+      } else {
+        out.push(`<pre style="${styleFor.pre}"><code>${fenceBuf.map(escapeHtml).join('\n')}</code></pre>`)
+        inFence = false
+        fenceBuf = []
+      }
+      continue
+    }
+
+    if (inFence) {
+      fenceBuf.push(line)
+      continue
+    }
+
     if (!line.trim()) {
       closeList()
+      continue
+    }
+
+    // ── horizontal rule ───────────────────────────────────────────────
+    if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) {
+      closeList()
+      out.push(`<hr style="${styleFor.hr}" />`)
       continue
     }
 
     const h = /^(#{1,6})\s+(.*)$/.exec(line)
     if (h) {
       closeList()
-      out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`)
+      const lv = Math.min(h[1].length, 4)
+      out.push(`<h${lv} style="${styleFor[`h${lv}`]}">${inline(h[2])}</h${lv}>`)
       continue
     }
 
     const li = /^[-*]\s+(.*)$/.exec(line)
     if (li) {
       if (!inList) {
-        out.push('<ul>')
+        out.push(`<ul style="margin: 0 0 ${P_ROOM}px; padding-left: 24px;">`)
         inList = true
       }
-      out.push(`<li>${inline(li[1])}</li>`)
+      out.push(`<li style="${styleFor.li}">${inline(li[1])}</li>`)
       continue
     }
 
     const quote = /^>\s?(.*)$/.exec(line)
     if (quote) {
       closeList()
-      out.push(`<blockquote>${inline(quote[1])}</blockquote>`)
+      out.push(`<blockquote style="${styleFor.blockquote}">${inline(quote[1])}</blockquote>`)
       continue
     }
 
     closeList()
-    out.push(`<p>${inline(line)}</p>`)
+    out.push(`<p style="${styleFor.p}">${inline(line)}</p>`)
+  }
+
+  // Unclosed fence: emit the buffer rather than dropping it silently.
+  if (inFence && fenceBuf.length) {
+    out.push(`<pre style="${styleFor.pre}"><code>${fenceBuf.map(escapeHtml).join('\n')}</code></pre>`)
   }
 
   closeList()
-  return out.join('\n')
+  return `<section style="font-size: 16px; color: #2b2b2b;">${out.join('\n')}</section>`
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function inline(text: string): string {
@@ -183,6 +241,12 @@ export function apply(ctx: Context) {
         mode: {
           type: 'string',
           description: "'draft_only' (default) or 'full_publish' (also submit for publication).",
+        },
+        spacing: {
+          type: 'number',
+          description:
+            'Gap between paragraphs in pixels, 12-64. Default 28. Raise it (e.g. 36) ' +
+            'when the article reads cramped on a phone; lower it for dense technical posts.',
         },
       },
 
@@ -288,7 +352,10 @@ export function apply(ctx: Context) {
         }
         // Strip a leading YAML frontmatter block if present.
         md = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
-        const content = markdownToHtml(md)
+        // `spacing` widens the gap between paragraphs; 28 is a comfortable
+        // default for long-form reading on a phone screen.
+        const room = typeof args.spacing === 'number' && args.spacing > 0 ? args.spacing : 28
+        const content = markdownToHtml(md, room)
         const digest =
           args.digest ?? (md.split(/\r?\n/).find((l) => l.trim() && !l.startsWith('#')) ?? '').slice(0, 120)
         result.stage = 'draft'
