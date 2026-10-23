@@ -23,7 +23,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readFile, stat } from 'node:fs/promises'
-import { basename, extname } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { basename, dirname, extname, resolve } from 'node:path'
 
 export const name = 'xiaoziwenjie-code-wechat-publisher'
 
@@ -84,7 +85,7 @@ function guessMime(path: string): string {
  * Minimal Markdown → WeChat-compatible HTML.
  * Deliberately small: WeChat strips <style> blocks, so only inline-safe tags survive.
  */
-function markdownToHtml(md: string, room: number): string {
+function markdownToHtml(md: string, room: number, resolveImage?: (src: string) => string | null): string {
   const P_ROOM = room            // space after each paragraph
   const H_ROOM = room + 14       // space above headings
   const LI_ROOM = Math.max(4, Math.round(room * 0.55))
@@ -155,7 +156,7 @@ function markdownToHtml(md: string, room: number): string {
     if (h) {
       closeList()
       const lv = Math.min(h[1].length, 4)
-      out.push(`<h${lv} style="${styleFor[`h${lv}`]}">${inline(h[2])}</h${lv}>`)
+      out.push(`<h${lv} style="${styleFor[`h${lv}`]}">${inline(h[2], resolveImage)}</h${lv}>`)
       continue
     }
 
@@ -165,19 +166,19 @@ function markdownToHtml(md: string, room: number): string {
         out.push(`<ul style="margin: 0 0 ${P_ROOM}px; padding-left: 24px;">`)
         inList = true
       }
-      out.push(`<li style="${styleFor.li}">${inline(li[1])}</li>`)
+      out.push(`<li style="${styleFor.li}">${inline(li[1], resolveImage)}</li>`)
       continue
     }
 
     const quote = /^>\s?(.*)$/.exec(line)
     if (quote) {
       closeList()
-      out.push(`<blockquote style="${styleFor.blockquote}">${inline(quote[1])}</blockquote>`)
+      out.push(`<blockquote style="${styleFor.blockquote}">${inline(quote[1], resolveImage)}</blockquote>`)
       continue
     }
 
     closeList()
-    out.push(`<p style="${styleFor.p}">${inline(line)}</p>`)
+    out.push(`<p style="${styleFor.p}">${inline(line, resolveImage)}</p>`)
   }
 
   // Unclosed fence: emit the buffer rather than dropping it silently.
@@ -193,7 +194,7 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-function inline(text: string): string {
+function inline(text: string, resolveImage?: (src: string) => string | null): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -201,7 +202,16 @@ function inline(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m: string, alt: string, src: string) => {
+      // WeChat drops <img> pointing at foreign hosts, so a local path has to be
+      // uploaded first. `null` means the upload failed — emit a visible note
+      // instead of a broken image that renders as a blank gap.
+      const resolved = resolveImage ? resolveImage(src) : src
+      if (resolved === null) {
+        return `<span style="color: #9aa0a6; font-size: 13px;">[图片上传失败: ${escapeHtml(alt || src)}]</span>`
+      }
+      return `<img src="${resolved}" alt="${escapeHtml(alt)}" style="max-width: 100%; display: block; margin: 0 auto;" />`
+    })
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
 }
 
@@ -355,7 +365,47 @@ export function apply(ctx: Context) {
         // `spacing` widens the gap between paragraphs; 28 is a comfortable
         // default for long-form reading on a phone screen.
         const room = typeof args.spacing === 'number' && args.spacing > 0 ? args.spacing : 28
-        const content = markdownToHtml(md, room)
+
+        // ── 3b. upload in-body images ─────────────────────────────────────
+        // WeChat blocks images hosted elsewhere, so every local image mentioned
+        // in the Markdown has to go through media/uploadimg first.
+        const imageCache = new Map<string, string | null>()
+        const mdDir = dirname(args.markdownPath)
+
+        // WeChat's uploadimg is async, so collect every local image first.
+        const localImages = [...md.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)]
+          .map((m) => m[2].trim())
+          .filter((src) => !/^https?:\/\//i.test(src))
+        const uniqueImages = [...new Set(localImages)]
+
+        for (const src of uniqueImages) {
+          let bytes: Buffer
+          let mime: string
+          try {
+            const abs = resolve(mdDir, src)
+            bytes = readFileSync(abs)
+            mime = guessMime(abs)
+          } catch {
+            imageCache.set(src, null)
+            continue
+          }
+          if (bytes.length > MAX_IMAGE_BYTES) {
+            imageCache.set(src, null)
+            continue
+          }
+          const form = new FormData()
+          form.append('media', new Blob([bytes], { type: mime }), basename(src))
+          const up = await wxFetch<WxError & { url?: string }>(
+            `${WX_API}/cgi-bin/media/uploadimg?access_token=***}`,
+            { method: 'POST', body: form },
+          )
+          imageCache.set(src, up.ok && up.data?.url ? up.data.url : null)
+        }
+
+        const content = markdownToHtml(md, room, (src) => {
+          if (/^https?:\/\//i.test(src)) return src
+          return imageCache.get(src) ?? null
+        })
         const digest =
           args.digest ?? (md.split(/\r?\n/).find((l) => l.trim() && !l.startsWith('#')) ?? '').slice(0, 120)
         result.stage = 'draft'

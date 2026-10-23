@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-wechat-publisher",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "微信公众号发布插件 for DeepSeek Harness — 把 Markdown + 封面直推草稿箱，纯 Node 零依赖，官方 cgi-bin 接口",
   "license": "MIT",
   "type": "module",
