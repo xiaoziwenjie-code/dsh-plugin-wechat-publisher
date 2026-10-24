@@ -145,6 +145,18 @@ function markdownToHtml(md: string, room: number, resolveImage?: (src: string) =
       continue
     }
 
+    // ── raw HTML passthrough ──────────────────────────────────────────
+    // A block-level HTML element (e.g. a hand-written CTA card) must reach
+    // WeChat untouched. Escaping it would print the tags as visible text.
+    // Everything else still goes through inline() and stays escaped.
+    // A closing tag left on its own line (`</section>`) belongs to the same
+    // passthrough — matching only opening tags printed the closer as text.
+    if (/^\s*<\/?(section|div|table|figure|p|h[1-6])[\s>]/i.test(line)) {
+      closeList()
+      out.push(line.trim())
+      continue
+    }
+
     // ── horizontal rule ───────────────────────────────────────────────
     if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) {
       closeList()
